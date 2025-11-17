@@ -81,7 +81,7 @@ impl ToolsConfig {
 /// Generic JSON‑Schema subset needed for our tool definitions
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub(crate) enum JsonSchema {
+pub enum JsonSchema {
     Boolean {
         #[serde(skip_serializing_if = "Option::is_none")]
         description: Option<String>,
@@ -117,7 +117,7 @@ pub(crate) enum JsonSchema {
 /// Whether additional properties are allowed, and if so, any required schema
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
-pub(crate) enum AdditionalProperties {
+pub enum AdditionalProperties {
     Boolean(bool),
     Schema(Box<JsonSchema>),
 }

@@ -36,10 +36,10 @@ pub struct Prompt {
 
     /// Tools available to the model, including additional tools sourced from
     /// external MCP servers.
-    pub(crate) tools: Vec<ToolSpec>,
+    pub tools: Vec<ToolSpec>,
 
     /// Whether parallel tool calls are permitted for this prompt.
-    pub(crate) parallel_tool_calls: bool,
+    pub parallel_tool_calls: bool,
 
     /// Optional override for the built-in BASE_INSTRUCTIONS.
     pub base_instructions_override: Option<String>,
@@ -291,7 +291,7 @@ pub(crate) struct ResponsesApiRequest<'a> {
     pub(crate) text: Option<TextControls>,
 }
 
-pub(crate) mod tools {
+pub mod tools {
     use crate::tools::spec::JsonSchema;
     use serde::Deserialize;
     use serde::Serialize;
@@ -300,7 +300,7 @@ pub(crate) mod tools {
     /// Responses API.
     #[derive(Debug, Clone, Serialize, PartialEq)]
     #[serde(tag = "type")]
-    pub(crate) enum ToolSpec {
+    pub enum ToolSpec {
         #[serde(rename = "function")]
         Function(ResponsesApiTool),
         #[serde(rename = "local_shell")]
@@ -326,27 +326,27 @@ pub(crate) mod tools {
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct FreeformTool {
-        pub(crate) name: String,
-        pub(crate) description: String,
-        pub(crate) format: FreeformToolFormat,
+        pub name: String,
+        pub description: String,
+        pub format: FreeformToolFormat,
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     pub struct FreeformToolFormat {
-        pub(crate) r#type: String,
-        pub(crate) syntax: String,
-        pub(crate) definition: String,
+        pub r#type: String,
+        pub syntax: String,
+        pub definition: String,
     }
 
     #[derive(Debug, Clone, Serialize, PartialEq)]
     pub struct ResponsesApiTool {
-        pub(crate) name: String,
-        pub(crate) description: String,
+        pub name: String,
+        pub description: String,
         /// TODO: Validation. When strict is set to true, the JSON schema,
         /// `required` and `additional_properties` must be present. All fields in
         /// `properties` must be present in `required`.
-        pub(crate) strict: bool,
-        pub(crate) parameters: JsonSchema,
+        pub strict: bool,
+        pub parameters: JsonSchema,
     }
 }
 
