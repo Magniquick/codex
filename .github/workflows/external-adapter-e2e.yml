@@ -1,0 +1,71 @@
+name: external-adapter-e2e
+
+on:
+  pull_request: {}
+  push:
+    branches: ['**']
+  workflow_dispatch: {}
+
+jobs:
+  changed:
+    name: Detect changed areas
+    runs-on: ubuntu-24.04
+    outputs:
+      codex: ${{ steps.detect.outputs.codex }}
+      workflows: ${{ steps.detect.outputs.workflows }}
+      external_adapter: ${{ steps.detect.outputs.external_adapter }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Detect changed paths
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA='${{ github.event.pull_request.base.sha }}'
+            HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+            mapfile -t files < <(git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA")
+          else
+            files=("codex-rs/force")
+          fi
+
+          codex=false
+          workflows=false
+          external_adapter=false
+
+          for f in "${files[@]}"; do
+            [[ $f == codex-rs/* ]] && codex=true
+            [[ $f == .github/* ]] && workflows=true
+            [[ $f == codex-rs/external-adapter/* || $f == codex-rs/app-server-protocol/* || $f == codex-rs/app-server/tests/* ]] && external_adapter=true
+          done
+
+          echo "codex=$codex" >> "$GITHUB_OUTPUT"
+          echo "workflows=$workflows" >> "$GITHUB_OUTPUT"
+          echo "external_adapter=$external_adapter" >> "$GITHUB_OUTPUT"
+
+  external_adapter_e2e:
+    name: External adapter E2E (mock provider path)
+    runs-on: ubuntu-24.04
+    needs: changed
+    if: ${{ needs.changed.outputs.external_adapter == 'true' || needs.changed.outputs.workflows == 'true' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    defaults:
+      run:
+        working-directory: codex-rs
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
+
+      - uses: dtolnay/rust-toolchain@1.93.0
+
+      - name: Build app-server and adapter bins
+        run: cargo build -p codex-app-server -p codex-external-adapter --quiet
+
+      - name: Run adapter tests (unit + e2e)
+        run: cargo test -p codex-external-adapter --quiet
