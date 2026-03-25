@@ -439,6 +439,61 @@ async fn maybe_emit_stream_notifications(
             )
             .await?;
         }
+        "item/completed" => {
+            if let Some(item) = params.get("item").and_then(JsonValue::as_object)
+                && let Some(item_type) = item.get("type").and_then(JsonValue::as_str)
+            {
+                match item_type {
+                    "agentMessage" => {
+                        let text = item
+                            .get("text")
+                            .and_then(JsonValue::as_str)
+                            .unwrap_or_default()
+                            .to_string();
+                        if !text.is_empty() {
+                            emit_stream_delta(
+                                serde_json::json!({
+                                    "threadId": params.get("threadId").cloned().unwrap_or(JsonValue::Null),
+                                    "turnId": params.get("turnId").cloned().unwrap_or(JsonValue::Null),
+                                    "delta": text,
+                                }),
+                                ExternalStreamChannel::OutputText,
+                                sequence,
+                                sock_write,
+                            )
+                            .await?;
+                        }
+                    }
+                    "reasoning" => {
+                        let summary = item
+                            .get("summary")
+                            .and_then(JsonValue::as_array)
+                            .map(|parts| {
+                                parts
+                                    .iter()
+                                    .filter_map(JsonValue::as_str)
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            })
+                            .unwrap_or_default();
+                        if !summary.is_empty() {
+                            emit_stream_delta(
+                                serde_json::json!({
+                                    "threadId": params.get("threadId").cloned().unwrap_or(JsonValue::Null),
+                                    "turnId": params.get("turnId").cloned().unwrap_or(JsonValue::Null),
+                                    "delta": summary,
+                                }),
+                                ExternalStreamChannel::ReasoningSummary,
+                                sequence,
+                                sock_write,
+                            )
+                            .await?;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
         _ => {}
     }
     Ok(())
