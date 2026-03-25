@@ -108,6 +108,8 @@ async fn adapter_emits_stream_diff_permission_and_queue_notifications() -> Resul
     .await?;
     let mut saw_queue_enqueued = false;
     let mut saw_queue_dequeued = false;
+    let mut saw_stream_delta = false;
+    let mut saw_input_echo = false;
     let turn_start: TurnStartResponse = loop {
         let message = read_next_jsonrpc(&mut lines).await?;
         match message {
@@ -124,12 +126,19 @@ async fn adapter_emits_stream_diff_permission_and_queue_notifications() -> Resul
                     saw_queue_dequeued = true;
                 }
             }
+            JSONRPCMessage::Notification(notification) if notification.method == "adapter/streamDelta" => {
+                let payload: ExternalStreamDeltaNotification =
+                    serde_json::from_value(notification.params.context("stream params")?)?;
+                if !payload.delta.is_empty() {
+                    saw_stream_delta = true;
+                }
+                if payload.channel == ExternalStreamChannel::InputEcho {
+                    saw_input_echo = true;
+                }
+            }
             _ => {}
         }
     };
-
-    let mut saw_stream_delta = false;
-    let mut saw_input_echo = false;
     let mut saw_diff_chunk = false;
     let mut permission_request_id: Option<String> = None;
 
@@ -228,8 +237,8 @@ async fn adapter_emits_stream_diff_permission_and_queue_notifications() -> Resul
         }
     }
 
-    assert!(saw_stream_delta, "expected stream delta from adapter");
     assert!(saw_input_echo, "expected input-echo stream delta from adapter");
+    assert!(saw_stream_delta, "expected at least one stream delta from adapter");
     assert!(saw_diff_chunk, "expected parseable diff chunk notification");
     assert!(saw_permission_resolved, "expected permission resolved notification");
 
