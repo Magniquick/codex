@@ -23,6 +23,7 @@ members = [
     "skills",
     "core",
     "environment",
+    "external-adapter",
     "hooks",
     "secrets",
     "exec",
