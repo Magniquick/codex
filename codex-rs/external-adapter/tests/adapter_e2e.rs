@@ -128,7 +128,8 @@ async fn adapter_emits_stream_diff_permission_and_queue_notifications() -> Resul
         }
     };
 
-    let mut saw_stream_output = false;
+    let mut saw_stream_delta = false;
+    let mut saw_input_echo = false;
     let mut saw_diff_chunk = false;
     let mut permission_request_id: Option<String> = None;
 
@@ -153,8 +154,11 @@ async fn adapter_emits_stream_diff_permission_and_queue_notifications() -> Resul
             "adapter/streamDelta" => {
                 let payload: ExternalStreamDeltaNotification =
                     serde_json::from_value(notification.params.context("stream params")?)?;
-                if payload.channel == ExternalStreamChannel::OutputText && !payload.delta.is_empty() {
-                    saw_stream_output = true;
+                if !payload.delta.is_empty() {
+                    saw_stream_delta = true;
+                }
+                if payload.channel == ExternalStreamChannel::InputEcho {
+                    saw_input_echo = true;
                 }
             }
             "adapter/diffChunk" => {
@@ -205,8 +209,11 @@ async fn adapter_emits_stream_diff_permission_and_queue_notifications() -> Resul
             "adapter/streamDelta" => {
                 let payload: ExternalStreamDeltaNotification =
                     serde_json::from_value(notification.params.context("stream params")?)?;
-                if payload.channel == ExternalStreamChannel::OutputText && !payload.delta.is_empty() {
-                    saw_stream_output = true;
+                if !payload.delta.is_empty() {
+                    saw_stream_delta = true;
+                }
+                if payload.channel == ExternalStreamChannel::InputEcho {
+                    saw_input_echo = true;
                 }
             }
             "adapter/diffChunk" => {
@@ -221,7 +228,8 @@ async fn adapter_emits_stream_diff_permission_and_queue_notifications() -> Resul
         }
     }
 
-    assert!(saw_stream_output, "expected output stream delta from adapter");
+    assert!(saw_stream_delta, "expected stream delta from adapter");
+    assert!(saw_input_echo, "expected input-echo stream delta from adapter");
     assert!(saw_diff_chunk, "expected parseable diff chunk notification");
     assert!(saw_permission_resolved, "expected permission resolved notification");
 
