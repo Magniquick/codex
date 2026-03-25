@@ -106,11 +106,28 @@ async fn adapter_emits_stream_diff_permission_and_queue_notifications() -> Resul
         })),
     )
     .await?;
-    let turn_start: TurnStartResponse =
-        extract_response_result(wait_for_response_id(&mut lines, 3).await?)?;
-
     let mut saw_queue_enqueued = false;
     let mut saw_queue_dequeued = false;
+    let turn_start: TurnStartResponse = loop {
+        let message = read_next_jsonrpc(&mut lines).await?;
+        match message {
+            JSONRPCMessage::Response(response) if response.id == RequestId::Integer(3) => {
+                break extract_response_result(response)?;
+            }
+            JSONRPCMessage::Notification(notification) if notification.method == "adapter/queueUpdated" => {
+                let payload: ExternalQueueUpdatedNotification =
+                    serde_json::from_value(notification.params.context("queue params")?)?;
+                if payload.operation == codex_app_server_protocol::ExternalQueueOperation::Enqueued {
+                    saw_queue_enqueued = true;
+                }
+                if payload.operation == codex_app_server_protocol::ExternalQueueOperation::Dequeued {
+                    saw_queue_dequeued = true;
+                }
+            }
+            _ => {}
+        }
+    };
+
     let mut saw_stream_output = false;
     let mut saw_diff_chunk = false;
     let mut permission_request_id: Option<String> = None;
