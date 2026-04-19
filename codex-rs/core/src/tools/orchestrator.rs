@@ -124,6 +124,16 @@ impl ToolOrchestrator {
         let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {
             default_exec_approval_requirement(approval_policy, &turn_ctx.file_system_sandbox_policy)
         });
+        tracing::debug!(
+            call_id = %tool_ctx.call_id,
+            tool_name = %tool_ctx.tool_name,
+            ?approval_policy,
+            file_system_sandbox_policy = ?turn_ctx.file_system_sandbox_policy,
+            sandbox_policy = ?turn_ctx.sandbox_policy.get(),
+            ?requirement,
+            use_guardian,
+            "tool orchestrator resolved initial approval requirement"
+        );
         match requirement {
             ExecApprovalRequirement::Skip { .. } => {
                 otel.tool_decision(
@@ -134,6 +144,12 @@ impl ToolOrchestrator {
                 );
             }
             ExecApprovalRequirement::Forbidden { reason } => {
+                tracing::debug!(
+                    call_id = %tool_ctx.call_id,
+                    tool_name = %tool_ctx.tool_name,
+                    reason = %reason,
+                    "tool orchestrator rejected before first attempt because approval requirement was forbidden"
+                );
                 return Err(ToolError::Rejected(reason));
             }
             ExecApprovalRequirement::NeedsApproval { reason, .. } => {
@@ -156,6 +172,12 @@ impl ToolOrchestrator {
                     &otel,
                 )
                 .await?;
+                tracing::debug!(
+                    call_id = %tool_ctx.call_id,
+                    tool_name = %tool_ctx.tool_name,
+                    ?decision,
+                    "tool orchestrator received initial approval decision"
+                );
 
                 match decision {
                     ReviewDecision::Denied | ReviewDecision::Abort => {
@@ -164,9 +186,21 @@ impl ToolOrchestrator {
                         } else {
                             "rejected by user".to_string()
                         };
+                        tracing::debug!(
+                            call_id = %tool_ctx.call_id,
+                            tool_name = %tool_ctx.tool_name,
+                            ?decision,
+                            reason = %reason,
+                            "tool orchestrator initial approval denied"
+                        );
                         return Err(ToolError::Rejected(reason));
                     }
                     ReviewDecision::TimedOut => {
+                        tracing::debug!(
+                            call_id = %tool_ctx.call_id,
+                            tool_name = %tool_ctx.tool_name,
+                            "tool orchestrator initial approval timed out"
+                        );
                         return Err(ToolError::Rejected(guardian_timeout_message()));
                     }
                     ReviewDecision::Approved
@@ -177,6 +211,11 @@ impl ToolOrchestrator {
                     } => match network_policy_amendment.action {
                         NetworkPolicyRuleAction::Allow => {}
                         NetworkPolicyRuleAction::Deny => {
+                            tracing::debug!(
+                                call_id = %tool_ctx.call_id,
+                                tool_name = %tool_ctx.tool_name,
+                                "tool orchestrator initial network policy amendment denied"
+                            );
                             return Err(ToolError::Rejected("rejected by user".to_string()));
                         }
                     },
@@ -197,6 +236,16 @@ impl ToolOrchestrator {
                 managed_network_active,
             ),
         };
+        tracing::debug!(
+            call_id = %tool_ctx.call_id,
+            tool_name = %tool_ctx.tool_name,
+            ?initial_sandbox,
+            managed_network_active,
+            sandbox_preference = ?tool.sandbox_preference(),
+            network_sandbox_policy = ?turn_ctx.network_sandbox_policy,
+            windows_sandbox_level = ?turn_ctx.windows_sandbox_level,
+            "tool orchestrator selected initial sandbox"
+        );
 
         // Platform-specific flag gating is handled by SandboxManager::select_initial.
         let use_legacy_landlock = turn_ctx.features.use_legacy_landlock();
@@ -228,6 +277,12 @@ impl ToolOrchestrator {
         match first_result {
             Ok(out) => {
                 // We have a successful initial result
+                tracing::debug!(
+                    call_id = %tool_ctx.call_id,
+                    tool_name = %tool_ctx.tool_name,
+                    ?initial_sandbox,
+                    "tool orchestrator first attempt succeeded"
+                );
                 Ok(OrchestratorRunResult {
                     output: out,
                     deferred_network_approval: first_deferred_network_approval,
@@ -244,13 +299,35 @@ impl ToolOrchestrator {
                 } else {
                     None
                 };
+                tracing::debug!(
+                    call_id = %tool_ctx.call_id,
+                    tool_name = %tool_ctx.tool_name,
+                    ?initial_sandbox,
+                    exit_code = output.exit_code,
+                    stdout = %output.stdout.text,
+                    stderr = %output.stderr.text,
+                    aggregated_output = %output.aggregated_output.text,
+                    ?network_policy_decision,
+                    ?network_approval_context,
+                    "tool orchestrator first attempt failed with sandbox denial"
+                );
                 if network_policy_decision.is_some() && network_approval_context.is_none() {
+                    tracing::debug!(
+                        call_id = %tool_ctx.call_id,
+                        tool_name = %tool_ctx.tool_name,
+                        "tool orchestrator returning sandbox denial because network decision had no approval context"
+                    );
                     return Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied {
                         output,
                         network_policy_decision,
                     })));
                 }
                 if !tool.escalate_on_failure() {
+                    tracing::debug!(
+                        call_id = %tool_ctx.call_id,
+                        tool_name = %tool_ctx.tool_name,
+                        "tool orchestrator returning sandbox denial because tool does not escalate on failure"
+                    );
                     return Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied {
                         output,
                         network_policy_decision,
@@ -271,6 +348,13 @@ impl ToolOrchestrator {
                                 ExecApprovalRequirement::NeedsApproval { .. }
                             );
                     if !allow_on_request_network_prompt {
+                        tracing::debug!(
+                            call_id = %tool_ctx.call_id,
+                            tool_name = %tool_ctx.tool_name,
+                            ?approval_policy,
+                            ?network_approval_context,
+                            "tool orchestrator returning sandbox denial because no-sandbox approval prompt is not allowed"
+                        );
                         return Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied {
                             output,
                             network_policy_decision,
@@ -284,6 +368,15 @@ impl ToolOrchestrator {
                             network_approval_context.host
                         )
                     } else {
+                        tracing::debug!(
+                            call_id = %tool_ctx.call_id,
+                            tool_name = %tool_ctx.tool_name,
+                            exit_code = output.exit_code,
+                            stdout = %output.stdout.text,
+                            stderr = %output.stderr.text,
+                            aggregated_output = %output.aggregated_output.text,
+                            "sandbox denial classified; preparing no-sandbox retry approval"
+                        );
                         build_denial_reason_from_output(output.as_ref())
                     };
 
@@ -291,6 +384,15 @@ impl ToolOrchestrator {
                 let bypass_retry_approval = tool
                     .should_bypass_approval(approval_policy, already_approved)
                     && network_approval_context.is_none();
+                tracing::debug!(
+                    call_id = %tool_ctx.call_id,
+                    tool_name = %tool_ctx.tool_name,
+                    bypass_retry_approval,
+                    already_approved,
+                    ?approval_policy,
+                    ?network_approval_context,
+                    "tool orchestrator evaluated retry approval requirement"
+                );
                 if !bypass_retry_approval {
                     let guardian_review_id = use_guardian.then(new_guardian_review_id);
                     let approval_ctx = ApprovalCtx {
@@ -313,6 +415,12 @@ impl ToolOrchestrator {
                         &otel,
                     )
                     .await?;
+                    tracing::debug!(
+                        call_id = %tool_ctx.call_id,
+                        tool_name = %tool_ctx.tool_name,
+                        ?decision,
+                        "tool orchestrator received retry approval decision"
+                    );
 
                     match decision {
                         ReviewDecision::Denied | ReviewDecision::Abort => {
@@ -322,9 +430,21 @@ impl ToolOrchestrator {
                             } else {
                                 "rejected by user".to_string()
                             };
+                            tracing::debug!(
+                                call_id = %tool_ctx.call_id,
+                                tool_name = %tool_ctx.tool_name,
+                                ?decision,
+                                reason = %reason,
+                                "tool orchestrator retry approval denied"
+                            );
                             return Err(ToolError::Rejected(reason));
                         }
                         ReviewDecision::TimedOut => {
+                            tracing::debug!(
+                                call_id = %tool_ctx.call_id,
+                                tool_name = %tool_ctx.tool_name,
+                                "tool orchestrator retry approval timed out"
+                            );
                             return Err(ToolError::Rejected(guardian_timeout_message()));
                         }
                         ReviewDecision::Approved
@@ -335,6 +455,11 @@ impl ToolOrchestrator {
                         } => match network_policy_amendment.action {
                             NetworkPolicyRuleAction::Allow => {}
                             NetworkPolicyRuleAction::Deny => {
+                                tracing::debug!(
+                                    call_id = %tool_ctx.call_id,
+                                    tool_name = %tool_ctx.tool_name,
+                                    "tool orchestrator retry network policy amendment denied"
+                                );
                                 return Err(ToolError::Rejected("rejected by user".to_string()));
                             }
                         },
@@ -367,12 +492,38 @@ impl ToolOrchestrator {
                     managed_network_active,
                 )
                 .await;
-                retry_result.map(|output| OrchestratorRunResult {
-                    output,
-                    deferred_network_approval: retry_deferred_network_approval,
-                })
+                match retry_result {
+                    Ok(output) => {
+                        tracing::debug!(
+                            call_id = %tool_ctx.call_id,
+                            tool_name = %tool_ctx.tool_name,
+                            "tool orchestrator no-sandbox retry succeeded"
+                        );
+                        Ok(OrchestratorRunResult {
+                            output,
+                            deferred_network_approval: retry_deferred_network_approval,
+                        })
+                    }
+                    Err(err) => {
+                        tracing::debug!(
+                            call_id = %tool_ctx.call_id,
+                            tool_name = %tool_ctx.tool_name,
+                            ?err,
+                            "tool orchestrator no-sandbox retry failed"
+                        );
+                        Err(err)
+                    }
+                }
             }
-            Err(err) => Err(err),
+            Err(err) => {
+                tracing::debug!(
+                    call_id = %tool_ctx.call_id,
+                    tool_name = %tool_ctx.tool_name,
+                    ?err,
+                    "tool orchestrator first attempt failed with non-sandbox-denial error"
+                );
+                Err(err)
+            }
         }
     }
 

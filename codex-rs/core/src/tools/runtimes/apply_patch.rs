@@ -213,6 +213,23 @@ impl ToolRuntime<ApplyPatchRequest, ExecToolCallOutput> for ApplyPatchRuntime {
         let started_at = Instant::now();
         let fs = environment.get_filesystem();
         let sandbox = Self::file_system_sandbox_context_for_attempt(req, attempt);
+        tracing::debug!(
+            call_id = %ctx.call_id,
+            tool_name = %ctx.tool_name,
+            attempt_sandbox = ?attempt.sandbox,
+            sandbox_policy = ?attempt.policy,
+            file_system_policy = ?attempt.file_system_policy,
+            network_policy = ?attempt.network_policy,
+            enforce_managed_network = attempt.enforce_managed_network,
+            sandbox_cwd = ?attempt.sandbox_cwd,
+            patch_cwd = ?req.action.cwd,
+            patch_file_count = req.action.changes().len(),
+            patch_files = ?req.action.changes().keys().collect::<Vec<_>>(),
+            permissions_preapproved = req.permissions_preapproved,
+            additional_permissions = ?req.additional_permissions,
+            has_runtime_filesystem_sandbox = sandbox.is_some(),
+            "apply_patch runtime starting"
+        );
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let result = codex_apply_patch::apply_patch(
@@ -226,6 +243,16 @@ impl ToolRuntime<ApplyPatchRequest, ExecToolCallOutput> for ApplyPatchRuntime {
         .await;
         let stdout = String::from_utf8_lossy(&stdout).into_owned();
         let stderr = String::from_utf8_lossy(&stderr).into_owned();
+        tracing::debug!(
+            call_id = %ctx.call_id,
+            tool_name = %ctx.tool_name,
+            attempt_sandbox = ?attempt.sandbox,
+            success = result.is_ok(),
+            stdout = %stdout,
+            stderr = %stderr,
+            duration_ms = started_at.elapsed().as_millis(),
+            "apply_patch runtime finished"
+        );
         Self::emit_output_delta(ctx, ExecOutputStream::Stdout, stdout.as_bytes()).await;
         Self::emit_output_delta(ctx, ExecOutputStream::Stderr, stderr.as_bytes()).await;
         let exit_code = if result.is_ok() { 0 } else { 1 };
@@ -238,6 +265,16 @@ impl ToolRuntime<ApplyPatchRequest, ExecToolCallOutput> for ApplyPatchRuntime {
             timed_out: false,
         };
         if result.is_err() && is_likely_sandbox_denied(attempt.sandbox, &output) {
+            tracing::debug!(
+                call_id = %ctx.call_id,
+                tool_name = %ctx.tool_name,
+                attempt_sandbox = ?attempt.sandbox,
+                exit_code = output.exit_code,
+                stdout = %output.stdout.text,
+                stderr = %output.stderr.text,
+                aggregated_output = %output.aggregated_output.text,
+                "apply_patch failure classified as sandbox denied"
+            );
             return Err(ToolError::Codex(CodexErr::Sandbox(SandboxErr::Denied {
                 output: Box::new(output),
                 network_policy_decision: None,

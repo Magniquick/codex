@@ -259,6 +259,19 @@ impl ExecPolicyManager {
             &exec_policy_fallback,
             &match_options,
         );
+        tracing::debug!(
+            ?command,
+            ?commands,
+            ?approval_policy,
+            ?sandbox_policy,
+            ?file_system_sandbox_policy,
+            ?sandbox_permissions,
+            ?prefix_rule,
+            used_complex_parsing,
+            auto_amendment_allowed,
+            ?evaluation,
+            "exec policy evaluated command"
+        );
 
         let requested_amendment = derive_requested_execpolicy_amendment_from_prefix_rule(
             prefix_rule.as_ref(),

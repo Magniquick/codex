@@ -724,25 +724,41 @@ pub(crate) fn is_likely_sandbox_denied(
         "failed to write file",
     ];
 
-    let has_sandbox_keyword = [
-        &exec_output.stderr.text,
-        &exec_output.stdout.text,
-        &exec_output.aggregated_output.text,
+    let keyword_match = [
+        ("stderr", &exec_output.stderr.text),
+        ("stdout", &exec_output.stdout.text),
+        ("aggregated_output", &exec_output.aggregated_output.text),
     ]
     .into_iter()
-    .any(|section| {
+    .find_map(|(stream, section)| {
         let lower = section.to_lowercase();
         SANDBOX_DENIED_KEYWORDS
             .iter()
-            .any(|needle| lower.contains(needle))
+            .find(|needle| lower.contains(**needle))
+            .map(|needle| (stream, *needle))
     });
 
-    if has_sandbox_keyword {
+    if let Some((stream, keyword)) = keyword_match {
+        tracing::debug!(
+            ?sandbox_type,
+            exit_code = exec_output.exit_code,
+            stream,
+            keyword,
+            stdout = %exec_output.stdout.text,
+            stderr = %exec_output.stderr.text,
+            aggregated_output = %exec_output.aggregated_output.text,
+            "classified command output as sandbox denied by keyword"
+        );
         return true;
     }
 
     const QUICK_REJECT_EXIT_CODES: [i32; 3] = [2, 126, 127];
     if QUICK_REJECT_EXIT_CODES.contains(&exec_output.exit_code) {
+        tracing::debug!(
+            ?sandbox_type,
+            exit_code = exec_output.exit_code,
+            "not classifying command output as sandbox denied because exit code is a quick reject"
+        );
         return false;
     }
 
@@ -752,6 +768,12 @@ pub(crate) fn is_likely_sandbox_denied(
         if sandbox_type == SandboxType::LinuxSeccomp
             && exec_output.exit_code == EXIT_CODE_SIGNAL_BASE + SIGSYS_CODE
         {
+            tracing::debug!(
+                ?sandbox_type,
+                exit_code = exec_output.exit_code,
+                signal = SIGSYS_CODE,
+                "classified command output as sandbox denied by SIGSYS"
+            );
             return true;
         }
     }

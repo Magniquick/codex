@@ -35,14 +35,27 @@ pub(crate) async fn apply_patch(
     file_system_sandbox_policy: &FileSystemSandboxPolicy,
     action: ApplyPatchAction,
 ) -> InternalApplyPatchInvocation {
-    match assess_patch_safety(
+    let safety = assess_patch_safety(
         &action,
         turn_context.approval_policy.value(),
         turn_context.sandbox_policy.get(),
         file_system_sandbox_policy,
         &turn_context.cwd,
         turn_context.windows_sandbox_level,
-    ) {
+    );
+    tracing::debug!(
+        cwd = ?turn_context.cwd,
+        approval_policy = ?turn_context.approval_policy.value(),
+        sandbox_policy = ?turn_context.sandbox_policy.get(),
+        ?file_system_sandbox_policy,
+        windows_sandbox_level = ?turn_context.windows_sandbox_level,
+        patch_cwd = ?action.cwd,
+        patch_file_count = action.changes().len(),
+        patch_files = ?action.changes().keys().collect::<Vec<_>>(),
+        ?safety,
+        "apply_patch safety decision"
+    );
+    match safety {
         SafetyCheck::AutoApprove {
             user_explicitly_approved,
             ..
